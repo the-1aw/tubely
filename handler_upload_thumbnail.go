@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,10 +41,19 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer file.Close()
-	contentType := header.Header.Get("content-type")
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Couldn't find video", err)
+		return
+	}
+	contentType := header.Header.Get("content-type")
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't parse media type", err)
+		return
+	}
+	if mediaType != "image/jped" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Unsupported media type", fmt.Errorf("Unsuported media type %s", mediaType))
 		return
 	}
 	splitContentType := strings.Split(contentType, "/")
