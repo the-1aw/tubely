@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -26,6 +27,16 @@ func authenticateUser(h http.Header, jwtSecret string) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	return userID, nil
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	fastStartPath := filePath + ".processing"
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", fastStartPath)
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	return fastStartPath, nil
 }
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
@@ -74,14 +85,23 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 	io.Copy(tmpFile, videofile)
-	tmpFile.Seek(0, io.SeekStart)
+	fastStartVideoPath, err := processVideoForFastStart(tmpFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Fail generating fastStart", err)
+	}
+	fastStartFile, err := os.Open(fastStartVideoPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Fail opening fastStartFile", err)
+	}
+	defer os.Remove(fastStartFile.Name())
+	defer fastStartFile.Close()
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	bucketKey := fmt.Sprintf("%s.%s", hex.EncodeToString(randBytes), "mp4")
 	cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(bucketKey),
-		Body:        tmpFile,
+		Body:        fastStartFile,
 		ContentType: aws.String(mimeType),
 	})
 	s3URL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, bucketKey)
