@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -9,10 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -37,6 +41,32 @@ func processVideoForFastStart(filePath string) (string, error) {
 		return "", err
 	}
 	return fastStartPath, nil
+}
+
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	preSignClient := s3.NewPresignClient(s3Client)
+	getObjectInput := s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	}
+	presignedRequest, err := preSignClient.PresignGetObject(context.TODO(), &getObjectInput, s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "", err
+	}
+	return presignedRequest.URL, nil
+}
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	bucket, key, ok := strings.Cut(*video.VideoURL, ",")
+	if !ok {
+		return database.Video{}, fmt.Errorf("invalid video url")
+	}
+	presignedUrl, err := generatePresignedURL(cfg.s3Client, bucket, key, time.Minute*5)
+	if err != nil {
+		return database.Video{}, err
+	}
+	video.VideoURL = &presignedUrl
+	return video, nil
 }
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +134,16 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		Body:        fastStartFile,
 		ContentType: aws.String(mimeType),
 	})
-	s3URL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, bucketKey)
-	video.VideoURL = &s3URL
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, bucketKey)
+	video.VideoURL = &videoURL
 	cfg.db.UpdateVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
+		return
+	}
+	signedVideo, err := cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get signed video", err)
+	}
+	respondWithJSON(w, http.StatusOK, signedVideo)
 }
