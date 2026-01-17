@@ -67,3 +67,4 @@ go run .
 ## 4. Improvements
 
 - [ ] Use functional options for server config instead of config struct
+- [ ] Use IaC to provision everything aws related

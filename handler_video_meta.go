@@ -94,11 +94,7 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusNotFound, "Couldn't get video", err)
 		return
 	}
-	signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't get signed video", err)
-	}
-	respondWithJSON(w, http.StatusOK, signedVideo)
+	respondWithJSON(w, http.StatusOK, dbVideo)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -118,13 +114,5 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve videos", err)
 		return
 	}
-	signedVideos := make([]database.Video, len(dbVideos))
-	for idx, dbVideo := range dbVideos {
-		signedVideo, err := cfg.dbVideoToSignedVideo(dbVideo)
-		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Couldn't get signed video", err)
-		}
-		signedVideos[idx] = signedVideo
-	}
-	respondWithJSON(w, http.StatusOK, signedVideos)
+	respondWithJSON(w, http.StatusOK, dbVideos)
 }
